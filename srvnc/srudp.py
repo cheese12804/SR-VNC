@@ -330,7 +330,8 @@ class TokenBucket:
 
     def __init__(self, rate_bps: int, burst_bytes: int) -> None:
         self.rate_bps = max(rate_bps, 64_000)
-        self.capacity = max(burst_bytes, self.rate_bps // 8)
+        # Use explicit burst capacity to keep queue small
+        self.capacity = max(1, burst_bytes)
         self.tokens = self.capacity
         self.timestamp = time.monotonic()
 
@@ -405,7 +406,7 @@ class SRUDPConnection:
         self._rtt = RttEstimator()
 
         self._video_queue: "queue.Queue[tuple[int, int, int, bytes]]" = queue.Queue()
-        self._video_bucket = TokenBucket(rate_bps=2_000_000, burst_bytes=MAX_UDP_PAYLOAD)
+        self._video_bucket = TokenBucket(rate_bps=2_000_000, burst_bytes=MAX_UDP_PAYLOAD * 2)
         self._video_reassembly: Dict[
             tuple[int, Address], tuple[list[Optional[bytes]], float]
         ] = {}
@@ -742,7 +743,7 @@ class SRUDPConnection:
             self._keepalive_thread.join(timeout=1.0)
 
     def set_video_bitrate(self, rate_bps: int) -> None:
-        self._video_bucket = TokenBucket(rate_bps=rate_bps, burst_bytes=MAX_UDP_PAYLOAD)
+        self._video_bucket = TokenBucket(rate_bps=rate_bps, burst_bytes=MAX_UDP_PAYLOAD * 2)
 
     def get_metrics(self) -> dict:
         return self._metrics.snapshot()
@@ -839,7 +840,18 @@ class SRUDPConnection:
             overhead = BASE_HEADER_SIZE + TLV_HEADER_SIZE + FRAGMENT_VALUE_SIZE + AEAD_TAG_SIZE
             wait = self._video_bucket.consume(len(chunk) + overhead)
             if wait > 0:
-                time.sleep(wait)
+                if wait > 0.2:
+                    # Congested: drop stale frames to keep latency low
+                    dropped = 0
+                    try:
+                        while True:
+                            _ = self._video_queue.get_nowait()
+                            dropped += 1
+                    except queue.Empty:
+                        pass
+                    # Skip sleeping; continue with current chunk to catch up
+                else:
+                    time.sleep(wait)
             self._send_packet(
                 stream_id=STREAM_VIDEO,
                 flags=0,

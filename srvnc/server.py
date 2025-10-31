@@ -99,8 +99,15 @@ class SRVNCServer:
         while self._running.is_set() and self.connection:
             start = time.time()
             frame = ImageGrab.grab()
+            # Downscale 50% to reduce bandwidth and encode time
+            try:
+                w, h = frame.size
+                frame = frame.resize((max(1, w // 2), max(1, h // 2)))
+            except Exception:
+                pass
             buffer = io.BytesIO()
-            frame.save(buffer, format="JPEG", quality=60)
+            # Lower JPEG quality to 45 to control bitrate
+            frame.save(buffer, format="JPEG", quality=45)
             data = buffer.getvalue()
             self.connection.send_video_frame(data)
             with self._metrics_lock:
