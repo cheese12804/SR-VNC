@@ -15,9 +15,9 @@ from typing import Optional, Tuple
 import tkinter as tk
 from PIL import Image, ImageTk
 
-from .nat import RelayClient, RelayConfig, discover_reflexive_address, send_hole_punch
-from .metrics_overlay import LocalVideoStats, MetricsOverlay
-from .srudp import SRUDPConnection
+from ..nat import RelayClient, RelayConfig, discover_reflexive_address, send_hole_punch
+from ..metrics_overlay import LocalVideoStats, MetricsOverlay
+from ..srudp import SRUDPConnection
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -326,3 +326,4 @@ def parse_host_port(value: str, default_port: int) -> Tuple[str, int]:
 
 if __name__ == "__main__":
     main()
+

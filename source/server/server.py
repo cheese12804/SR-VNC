@@ -13,8 +13,8 @@ from typing import Optional, Tuple
 import pyautogui
 from PIL import ImageGrab
 
-from .nat import RelayClient, RelayConfig, discover_reflexive_address, send_hole_punch
-from .srudp import SRUDPConnection
+from ..nat import RelayClient, RelayConfig, discover_reflexive_address, send_hole_punch
+from ..srudp import SRUDPConnection
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 pyautogui.FAILSAFE = False
@@ -250,3 +250,4 @@ def parse_host_port(value: str, default_port: int) -> Tuple[str, int]:
         host, port_str = value.rsplit(":", 1)
         return host, int(port_str)
     return value, default_port
+

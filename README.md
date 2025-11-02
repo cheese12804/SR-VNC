@@ -1,145 +1,275 @@
-# SR-VNC – Secure Reliable Virtual Network Computing
+# BÀI TẬP LỚN: LẬP TRÌNH MẠNG  
 
-SR-VNC là một bản demo đầy đủ cho ý tưởng "Secure Reliable UDP" (SRUDP),
-cho phép truyền hình ảnh màn hình qua UDP nhưng vẫn ưu tiên độ tin cậy cho
-luồng điều khiển chuột/phím. Dự án được tách thành hai phần chính: lớp vận
-chuyển SRUDP và ứng dụng remote desktop.
+## SR-VNC: Secure Reliable Virtual Network Computing
 
-## Kiến trúc Giao thức
+> 📘 *Hệ thống Remote Desktop qua UDP với bảo mật và độ tin cậy. Server chụp và truyền màn hình, client hiển thị và gửi điều khiển chuột/phím. Sử dụng SRUDP (Secure Reliable UDP) với mã hóa AES-GCM, Selective Repeat ARQ cho control stream, và best-effort cho video stream.*
 
-Phiên bản nâng cấp của SRUDP có hai pha: **bắt tay bảo mật** và **truyền tải
-song song**.
+---
 
-### Bắt tay (X25519 + cookie)
+## 🧑‍💻 THÔNG TIN NHÓM
 
-1. Client gửi `client_hello` với khóa công khai X25519 ngẫu nhiên và nonce.
-2. Server trả lời `hello_retry` kèm cookie HMAC (chống spoof) nếu chưa xác
-   thực địa chỉ nguồn.
-3. Khi client gửi lại `client_hello` kèm cookie hợp lệ, server phản hồi
-   `server_hello` (khóa công khai + nonce).
-4. Hai bên sinh khóa chung qua X25519, đưa vào HKDF cùng nonce, session-id và
-   PSK (SHA-256 của mật khẩu) → sinh ra cặp khóa AES-GCM và prefix nonce.
-5. Client gửi `client_finish`. Từ đây mọi payload đều được mã hóa, replay check
-   bằng số packet 64-bit và cửa sổ trượt.
-6. Rekey tự động sau 1 GiB hoặc 60 phút bằng thủ tục tương tự (`rekey_request`).
+| STT | Họ và Tên | MSSV | Email | Đóng góp |
+|-----|-----------|------|-------|----------|
+| 1 | [Họ tên sinh viên 1] | [MSSV] | [Email] | Client module, GUI, telemetry |
+| 2 | [Họ tên sinh viên 2] | [MSSV] | [Email] | Server module, video capture, control |
+| 3 | [Họ tên sinh viên 3] | [MSSV] | [Email] | SRUDP transport, crypto, NAT traversal |
 
-Nonce của AES-GCM không bao giờ lặp vì được xây dựng từ prefix (4 byte) + packet
-number 64-bit. Header plaintext (`stream`, `seq`, `fragment`, `packet_number`) được
-đưa vào AAD để chống sửa đổi.
+**Tên nhóm:** [Tên nhóm của bạn]  
+**Chủ đề đã đăng ký:** Remote Desktop / Secure UDP Transport
 
-### Truyền tải hai luồng
+---
 
-* **Luồng điều khiển (ID `0x01`)** – Selective Repeat ARQ với SACK 32-bit,
-  ước lượng RTT/RTO theo RFC 6298, tự động backoff khi retransmit. 100% tin cậy.
-* **Luồng video (ID `0x02`)** – Best effort, bỏ frame cũ, chia mảnh mỗi gói ≤
-  1200 byte để tránh IP fragmentation. Token bucket pacing đảm bảo control không
-  bị block khi bitrate video tăng đột biến.
+## 🧠 MÔ TẢ HỆ THỐNG
 
-Mỗi gói đều đi kèm telemetry: RTT p50/p95, tỷ lệ mất control, jitter, bitrate
-video… dùng cho overlay demo.
+> **SR-VNC** là hệ thống Remote Desktop cho phép điều khiển máy tính từ xa qua mạng UDP với hai đặc điểm chính: **bảo mật** (mã hóa AES-GCM) và **độ tin cậy** (Selective Repeat ARQ cho control, best-effort cho video).
 
-## Thành phần chính
+**Tổng quan:**
+- **Server (Host)**: Chụp màn hình bằng `PIL.ImageGrab`, nén JPEG, gửi qua luồng video (best-effort). Nhận lệnh điều khiển chuột/phím từ client và thực thi bằng `pyautogui`.
+- **Client (Viewer)**: Hiển thị video frames real-time bằng Tkinter GUI, thu thập input events (chuột/phím) và gửi lên server qua luồng điều khiển (100% reliable với ARQ retransmission).
+- **SRUDP Transport**: Lớp transport tùy biến trên UDP với handshake X25519 + HKDF, mã hóa AES-GCM, replay protection, và hai luồng song song (control reliable + video best-effort).
 
-- `srvnc/crypto.py`: Phiên handshake X25519 + HKDF, quản lý nonce, replay,
-  rekey và SecureCodec.
-- `srvnc/srudp.py`: SRUDP thế hệ mới (Selective Repeat + SACK, pacing, telemetry,
-  reassembly video, rekey).
-- `srvnc/server.py`: Host (máy bị điều khiển). Chụp màn hình bằng
-  `PIL.ImageGrab`, nén JPEG và gửi qua luồng video. Nhận lệnh điều khiển và
-  thực thi bằng `pyautogui`.
-- `srvnc/client.py`: Viewer (máy điều khiển). Tkinter hiển thị frame, overlay
-  telemetry real-time, thu thập sự kiện và gửi đi.
-- `srvnc/nat.py`: STUN discovery, UDP hole punching, TURN-style relay fallback.
-- `srvnc/relay.py`: UDP relay cực nhẹ (chạy `python -m srvnc.relay`).
-- `requirements.txt`: Danh sách thư viện phụ thuộc.
-
-## Cách chạy demo
-
-1. Cài đặt phụ thuộc (khuyến nghị tạo virtualenv):
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. (Tuỳ chọn) chạy relay UDP nội bộ để làm TURN fallback:
-
-   ```bash
-   python -m srvnc.relay --host 0.0.0.0 --port 7000
-   ```
-
-3. Trên Host (máy bị điều khiển), chạy:
-
-   ```bash
-   python -m srvnc.server --host 0.0.0.0 --port 5000 \
-       --client-host <IP_CLIENT> --client-port 5001 --password <SECRET>
-   ```
-
-   Tuỳ chọn NAT/relay:
-
-   * `--stun-server stun.l.google.com:19302` để in reflexive address.
-   * `--relay 1.2.3.4:7000 --session demo-1` để sử dụng TURN fallback.
-   * `--bitrate 1500000` để giới hạn video 1.5 Mbps.
-
-4. Trên Client (máy điều khiển), chạy:
-
-   ```bash
-   python -m srvnc.client --host 0.0.0.0 --port 5001 \
-       --server-host <IP_HOST> --server-port 5000 --password <SECRET>
-   ```
-
-   Tuỳ chọn: thêm `--relay <HOST:PORT>` hoặc `--stun-server ...` giống server.
-
-Sau khi kết nối, client hiển thị overlay màu xanh với các số đo RTT, FPS,
-bitrate, loss%. Server log metrics cùng lúc.
-
-## Telemetry Overlay
-
-Overlay cập nhật mỗi giây với các chỉ số chính để đối chiếu tiêu chí chất lượng:
-
-- `ctrl_rtt_p50_ms`, `ctrl_rtt_p95_ms`, `ctrl_rtt_p99_ms`: RTT của luồng điều khiển sau ARQ.
-- `ctrl_loss_percent`, `ctrl_est_loss_percent`, `ctrl_retrans`, `ctrl_inflight`: Tỷ lệ mất thực tế, tỷ lệ ước lượng từ số lần retransmit và số gói đang chờ ACK.
-- `video_send_fps`, `video_send_mbps`: FPS và bitrate từ phía host (được gửi kèm gói metrics).
-- `video_render_fps`, `video_render_mbps`: FPS/bitrate sau khi client thực sự render frame.
-- `video_jitter_p95_ms`, `host_video_fps`, `host_video_mbps`: độ dao động giữa các frame và tốc độ capture hiện tại.
-
-Ảnh chụp overlay là bằng chứng trực quan cho việc control vẫn "mượt" trong khi video chịu mất mát.
-
-## Hồ sơ mạng gợi ý cho phần demo "so găng"
-
-Script `scripts/netem_profiles.sh` giúp áp dụng nhanh ba cấu hình mạng chuẩn:
-
-```bash
-sudo ./scripts/netem_profiles.sh <iface> loss15      # 15% packet loss ngẫu nhiên
-sudo ./scripts/netem_profiles.sh <iface> jitter80    # RTT ~80 ms ±5 ms jitter
-sudo ./scripts/netem_profiles.sh <iface> throttle2m  # Giới hạn ~2 Mbps + delay nhẹ
-
-# Reset giữa các bài test
-sudo ./scripts/netem_profiles.sh <iface> clear
+**Cấu trúc logic tổng quát:**
+```
+┌─────────────┐                    ┌─────────────┐
+│   Client    │ ◄─── SRUDP ───► │   Server    │
+│  (Viewer)   │  AES-GCM + ARQ   │   (Host)    │
+│             │                  │             │
+│ - Display   │                  │ - Capture   │
+│ - Input     │                  │ - Control   │
+│ - Telemetry │                  │ - Encode    │
+└─────────────┘                  └─────────────┘
 ```
 
-Thực hiện trên cả hai chiều để mô phỏng mạng đối xứng. Xem thêm hướng dẫn chi tiết trong
-[`scripts/ab_compare.md`](scripts/ab_compare.md).
+**Sơ đồ hệ thống:**
 
-## Tiêu chí "Done" & kiểm chứng
+![System Diagram](./statics/diagram.png)
 
-* **Control:** overlay phải báo `ctrl_loss_percent = 0%` sau ARQ và `ctrl_rtt_p50_ms ≤ 80` ở profile `jitter80`.
-* **Video:** `video_send_fps ≥ 12` và `video_send_mbps ≈ 2` khi dùng profile `throttle2m`, đồng thời con trỏ vẫn phản hồi tức thì.
-* **Bảo mật:** Wireshark với filter `udp.port == <PORT>` chỉ hiển thị payload đã mã hóa; kiểm tra log rekey xác nhận xoay khóa ≤ 1 GiB hoặc 60 phút.
-* **NAT traversal:** ưu tiên kết nối trực tiếp/hole-punch; chỉ fallback relay khi cần và ghi chú lại trong báo cáo.
-* **Replay & telemetry:** đối chiếu `ack_updates`, `ctrl_retrans`, `ctrl_inflight` trên overlay để chứng minh selective-repeat + replay window hoạt động.
+---
 
-Lưu ảnh overlay, cấu hình `tc`, và capture Wireshark để làm bằng chứng hoàn tất bộ tiêu chí trên.
+## ⚙️ CÔNG NGHỆ SỬ DỤNG
 
-## Kịch bản demo gợi ý
+> Liệt kê công nghệ, framework, thư viện chính mà nhóm sử dụng.
 
-1. **So sánh với VNC/TCP**: Với profile loss 15%, quay clip con trỏ vẫn mượt
-   (control stream giữ ACK đầy đủ, retransmission không block video).
-2. **Stress-test**: kéo cửa sổ liên tục, gõ phím nhanh – overlay hiển thị FPS
-   ≥ 12 ở 2 Mbps, trong khi control RTT p95 < 80 ms.
-3. **Chứng minh bảo mật**: mở Wireshark – chỉ thấy UDP "rác" vì header đã bảo
-   vệ bằng AAD và payload AES-GCM.
+| Thành phần | Công nghệ | Ghi chú |
+|------------|-----------|---------|
+| Ngôn ngữ | Python 3.8+ | Server và Client đều dùng Python |
+| Server | `PIL`/`Pillow` (ImageGrab), `pyautogui` | Chụp màn hình, điều khiển input |
+| Client | `tkinter`, `PIL` (ImageTk) | GUI hiển thị video, capture input |
+| Transport | **SRUDP** (Custom UDP protocol) | Dual-stream: control (ARQ) + video (best-effort) |
+| Cryptography | `cryptography` | X25519 ECDH, HKDF, AES-GCM (256-bit) |
+| NAT Traversal | STUN protocol, UDP hole punching, Relay fallback | Tự implement STUN client và relay server |
+| Mã hóa | AES-GCM với nonce deterministic | Prefix (6B) + packet number (6B), AAD = header |
+| Reliability | Selective Repeat ARQ + SACK | RFC 6298 RTT/RTO estimation |
 
-> ⚠️ Việc chụp màn hình & điều khiển chuột/phím yêu cầu quyền hệ thống. Trên
-> môi trường headless (CI) các thư viện như `ImageGrab` hay `pyautogui` có
-> thể không hoạt động; tuy nhiên, mã nguồn đã sẵn sàng để demo trên desktop
-> thực tế.
+---
+
+## 🚀 HƯỚNG DẪN CHẠY DỰ ÁN
+
+### 1. Clone repository
+```bash
+git clone <repository-url>
+cd assignment-network-project
+```
+
+### Cài đặt dependencies
+```bash
+# Từ thư mục gốc dự án
+pip install -r requirements.txt
+```
+
+**Dependencies chính:**
+- `cryptography` - X25519, AES-GCM, HKDF
+- `Pillow` - ImageGrab (server), Image/ImageTk (client)
+- `pyautogui` - Điều khiển chuột/phím (server)
+- `tkinter` - GUI (thường có sẵn với Python)
+
+### 2. Chạy server
+```bash
+# Cơ bản (localhost)
+python -m source.server.server --host 0.0.0.0 --port 5000 \
+    --client-host 127.0.0.1 --client-port 5001 --password demo123
+
+# Với tùy chỉnh FPS và bitrate
+python -m source.server.server --host 0.0.0.0 --port 5000 \
+    --client-host 127.0.0.1 --client-port 5001 \
+    --password demo123 --fps 15 --bitrate 1000000
+
+# Với NAT traversal (STUN) hoặc relay
+python -m source.server.server ... --stun-server stun.l.google.com:19302
+python -m source.server.server ... --relay 1.2.3.4:7000 --session abc123
+```
+
+### 3. Chạy client
+```bash
+# Cơ bản (localhost) - chạy trong terminal riêng sau khi server đã khởi động
+python -m source.client.client --host 0.0.0.0 --port 5001 \
+    --server-host 127.0.0.1 --server-port 5000 --password demo123
+
+# Qua mạng LAN
+python -m source.client.client --host 0.0.0.0 --port 5001 \
+    --server-host 192.168.1.50 --server-port 5000 --password secret123
+
+# Với NAT traversal hoặc relay (cấu hình giống server)
+python -m source.client.client ... --stun-server stun.l.google.com:19302
+python -m source.client.client ... --relay 1.2.3.4:7000 --session abc123
+```
+
+### 4. Kiểm thử nhanh
+```bash
+# Terminal 1: Server
+python -m source.server.server --host 127.0.0.1 --port 6000 \
+    --client-host 127.0.0.1 --client-port 6001 --password test123
+
+# Terminal 2: Client (sau khi server đã chạy)
+python -m source.client.client --host 0.0.0.0 --port 6001 \
+    --server-host 127.0.0.1 --server-port 6000 --password test123
+
+# Kết quả mong đợi:
+# - Server log: "[INFO] Starting SR-VNC host on..."
+# - Client hiển thị cửa sổ với màn hình remote desktop
+# - Di chuyển chuột trong cửa sổ client → server di chuyển con trỏ tương ứng
+# - Click chuột/phím trong client → server thực hiện action
+# - Overlay telemetry hiển thị RTT, FPS, loss% ở góc trên trái cửa sổ
+```
+
+**Lưu ý:** Đảm bảo server đã chạy trước khi khởi động client. Password phải khớp giữa client và server.
+
+---
+
+## 🔗 GIAO TIẾP (GIAO THỨC SỬ DỤNG)
+
+**SRUDP Protocol** - Secure Reliable UDP với handshake X25519 và hai luồng song song.
+
+### Handshake Messages (JSON qua UDP, trước khi mã hóa)
+
+| Message Type | Direction | Protocol | Input | Output |
+|--------------|-----------|----------|-------|--------|
+| `client_hello` | Client → Server | UDP/JSON | `{"type":"client_hello","client_random":"...","client_pub":"...","timestamp":...}` | `{"type":"hello_retry","cookie":"...","timestamp":...}` hoặc `{"type":"server_hello","server_random":"...","server_pub":"..."}` |
+| `hello_retry` | Server → Client | UDP/JSON | (Cookie challenge) | Client gửi lại `client_hello` với cookie |
+| `server_hello` | Server → Client | UDP/JSON | (Server public key + nonce) | `{"type":"client_finish"}` |
+| `client_finish` | Client → Server | UDP/JSON | (Finalize handshake) | Session established |
+
+**Sau handshake**: Tất cả payload được mã hóa AES-GCM.
+
+### Data Streams (AES-GCM encrypted)
+
+| Stream ID | Type | Protocol | Reliability | Mục đích |
+|-----------|------|----------|-------------|----------|
+| `0x01` | Control | SRUDP | **100% reliable** (Selective Repeat ARQ) | Chuột/phím events, metrics |
+| `0x02` | Video | SRUDP | **Best-effort** (drop old frames) | Video frames (JPEG), fragmentation |
+
+### Control Events (JSON trong control stream)
+
+| Event Type | Direction | Input | Mục đích |
+|------------|-----------|-------|----------|
+| `mouse_move` | Client → Server | `{"type":"mouse_move","x":100,"y":200}` | Di chuyển con trỏ |
+| `mouse_click` | Client → Server | `{"type":"mouse_click","x":100,"y":200,"button":"left","pressed":true}` | Click chuột |
+| `key_down` / `key_up` | Client → Server | `{"type":"key_down","key":"a"}` | Nhấn phím |
+| `metrics` | Server → Client | `{"type":"metrics","values":{...}}` | Telemetry (FPS, bitrate) |
+
+---
+
+## 📊 KẾT QUẢ THỰC NGHIỆM
+
+> Đưa ảnh chụp kết quả hoặc mô tả log chạy thử.
+
+![Demo Result](./statics/result.png)
+
+---
+
+## 🧩 CẤU TRÚC DỰ ÁN
+```
+assignment-network-project/
+├── README.md                    # File này
+├── INSTRUCTION.md               # Hướng dẫn (KHÔNG chỉnh sửa)
+├── requirements.txt             # Dependencies (root)
+├── statics/                     # Hình ảnh, diagram
+│   ├── diagram.png
+│   └── result.png
+└── source/                      # Toàn bộ mã nguồn
+    ├── .gitignore
+    ├── __init__.py
+    ├── requirements.txt
+    ├── client/                  # Module phía client
+    │   ├── README.md
+    │   ├── __init__.py
+    │   └── client.py           # SRVNCClient, VideoWindow
+    ├── server/                  # Module phía server
+    │   ├── README.md
+    │   ├── __init__.py
+    │   └── server.py            # SRVNCServer
+    ├── srudp.py                 # SRUDP transport layer
+    ├── crypto.py                # X25519 handshake, AES-GCM, HKDF
+    ├── nat.py                   # STUN, UDP hole punching
+    ├── relay.py                 # UDP relay server (TURN fallback)
+    └── metrics_overlay.py        # Telemetry formatting
+```
+
+**Giải thích cấu trúc:**
+- `client/`: Viewer application với Tkinter GUI
+- `server/`: Host application với video capture và input control
+- `srudp.py`: Core transport với handshake, encryption, ARQ, fragmentation
+- `crypto.py`: Cryptographic primitives (X25519, HKDF, AES-GCM, cookie HMAC)
+- `nat.py`: NAT traversal helpers (STUN discovery, hole punching)
+- `relay.py`: Fallback relay server khi NAT strict
+- `metrics_overlay.py`: Tính toán và format telemetry metrics
+
+---
+
+## 🧩 HƯỚNG PHÁT TRIỂN THÊM
+
+> Nêu ý tưởng mở rộng hoặc cải tiến hệ thống.
+
+- [ ] **Video codec nâng cao**: Thay JPEG bằng H.264/H.265 với hardware encoding để giảm bitrate và tăng chất lượng
+- [ ] **Adaptive bitrate**: Tự động điều chỉnh FPS/quality dựa trên RTT và loss rate
+- [ ] **Multi-monitor support**: Hỗ trợ nhiều màn hình, cho phép chọn monitor để share
+- [ ] **File transfer**: Thêm luồng reliable thứ 3 cho file transfer qua SRUDP
+- [ ] **Clipboard sync**: Đồng bộ clipboard giữa client và server
+- [ ] **Audio streaming**: Truyền audio qua luồng best-effort riêng
+- [ ] **Mobile client**: Port client lên Android/iOS với UI touch-friendly
+- [ ] **Web client**: WebRTC-based client chạy trên browser
+- [ ] **Session recording**: Ghi lại session để playback sau
+- [ ] **Multi-user support**: Nhiều client cùng xem một server session
+- [ ] **Permission system**: Phân quyền (chỉ xem, chỉ điều khiển, full access)
+- [ ] **Cloud deployment**: Deploy relay server lên cloud (AWS/GCP) với load balancing
+
+---
+
+## 📝 GHI CHÚ
+
+- Repo tuân thủ đúng cấu trúc đã hướng dẫn trong `INSTRUCTION.md`.
+- Đảm bảo test kỹ trước khi submit.
+
+---
+
+## 📚 TÀI LIỆU THAM KHẢO
+
+> Liệt kê các tài liệu, API docs, hoặc nguồn tham khảo đã sử dụng.
+
+### RFC Standards
+- **RFC 5389**: Session Traversal Utilities for NAT (STUN)
+- **RFC 6298**: Computing TCP's Retransmission Timer (RTT/RTO estimation)
+- **RFC 8446**: The Transport Layer Security (TLS) Protocol Version 1.3 (HKDF inspiration)
+- **RFC 9000**: QUIC: A UDP-Based Multiplexed and Secure Transport (Selective Repeat ARQ, dual-stream design)
+
+### Cryptography
+- **X25519**: Elliptic Curve Diffie-Hellman Key Exchange (`cryptography` library)
+- **AES-GCM**: Authenticated Encryption (NIST SP 800-38D)
+- **HKDF**: HMAC-based Key Derivation Function (RFC 5869)
+
+### Libraries & Tools
+- **cryptography**: [https://cryptography.io/](https://cryptography.io/) - Python cryptography library
+- **Pillow (PIL)**: [https://pillow.readthedocs.io/](https://pillow.readthedocs.io/) - Python Imaging Library
+- **tkinter**: Built-in Python GUI toolkit
+
+### Protocols & Techniques
+- **Selective Repeat ARQ**: Reliable data transmission over unreliable channels
+- **SACK (Selective Acknowledgment)**: Efficient ACK mechanism for out-of-order packets
+- **Token Bucket**: Bandwidth pacing algorithm
+- **UDP Hole Punching**: NAT traversal technique
+- **STUN Protocol**: NAT type discovery
+
+### Related Projects
+- **VNC**: Remote desktop protocol (inspiration, nhưng dùng TCP)
+- **WebRTC**: Real-time communication (similar dual-stream approach)
+- **QUIC**: Secure UDP transport (inspiration for SRUDP design)
